@@ -71,7 +71,7 @@ const App = () => {
     if (!frame) return;
 
     try {
-      const response = await axios.post("https://f4a6-104-196-52-156.ngrok-free.app/process_frame", {
+      const response = await axios.post("https://f9a4-34-75-4-219.ngrok-free.app//process_frame", {
         frame,
       });
 
