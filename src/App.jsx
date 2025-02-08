@@ -33,14 +33,18 @@ const App = () => {
     };
 
     fetchDictionary();
-    return () => clearInterval(intervalId); // Cleanup saat unmount
+    useEffect(() => {
+      return () => {
+        if (intervalId) clearInterval(intervalId);
+      };
+    }, [intervalId]);    
   }, []);
 
   const autocorrect = (text) => {
     let correctedText = text.toLowerCase();
     Object.entries(dictionary).forEach(([word, typoList]) => {
       typoList.forEach(({ typo }) => {
-        const regex = new RegExp(\\b${typo}\\b, "gi");
+        const regex = new RegExp(`\\b${typo}\\b`, "gi");
         correctedText = correctedText.replace(regex, word);
       });
     });
@@ -69,7 +73,7 @@ const App = () => {
     if (!frame) return;
 
     try {
-      const response = await axios.post("https://f9a4-34-75-4-219.ngrok-free.app//process_frame", {
+      const response = await axios.post("https://f9a4-34-75-4-219.ngrok-free.app/process_frame", {
         frame,
       });
 
@@ -96,13 +100,12 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (intervalId) clearInterval(intervalId);
-
+    sendFrameToServer(); // Panggil pertama kali
     const newIntervalId = setInterval(sendFrameToServer, fetchInterval);
     setIntervalId(newIntervalId);
-
+  
     return () => clearInterval(newIntervalId);
-  }, [fetchInterval]);
+  }, [fetchInterval]);  
 
   const handleIntervalChange = (e) => {
     setFetchInterval(Number(e.target.value));
