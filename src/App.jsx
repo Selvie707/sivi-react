@@ -1,95 +1,129 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+React:
 
-function App() {
-  const [sentence, setSentence] = useState(''); // Menyimpan kalimat deteksi
-  const [lastConfidence, setLastConfidence] = useState(null); // Menyimpan confidence terakhir
-  const [imageSrc, setImageSrc] = useState('');
-  const [fetchInterval, setFetchInterval] = useState(1000); // Interval fetching dalam ms
-  const [intervalId, setIntervalId] = useState(null); // Menyimpan ID interval aktif
-  const [dictionary, setDictionary] = useState({});
+import React, { useEffect, useRef, useState } from "react";
+import axios from "axios";
+
+const App = () => {
+  const videoRef = useRef(null);
+  const [sentence, setSentence] = useState(""); // Menyimpan kalimat hasil deteksi
+  const [lastConfidence, setLastConfidence] = useState(null); // Confidence terakhir
+  const [fetchInterval, setFetchInterval] = useState(1000); // Interval fetching (ms)
+  const [intervalId, setIntervalId] = useState(null); // ID interval aktif
+  const [dictionary, setDictionary] = useState({}); // Dictionary untuk autocorrect
+  const [detections, setDetections] = useState([]); // Menyimpan hasil deteksi individu
 
   useEffect(() => {
-    // Mengambil dictionary dari file public
+    // Akses kamera dan atur video feed
+    navigator.mediaDevices
+      .getUserMedia({ video: true })
+      .then((stream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      })
+      .catch((err) => console.error("Error accessing camera: ", err));
+
+    // Ambil dictionary dari file public
     const fetchDictionary = async () => {
       try {
-        const response = await fetch('/dictionary.json');
+        const response = await fetch("/dictionary.json");
         const data = await response.json();
-        setDictionary(data); // Simpan dictionary yang diambil
+        setDictionary(data);
       } catch (error) {
-        console.error('Error fetching dictionary:', error);
+        console.error("Error fetching dictionary:", error);
       }
     };
 
-    fetchDictionary(); // Panggil fungsi untuk mengambil dictionary
-    setImageSrc('https://eae5-34-73-255-143.ngrok-free.app/video_feed'); // Set video feed URL
+    fetchDictionary();
     return () => clearInterval(intervalId); // Cleanup saat unmount
   }, []);
 
-  // Fungsi untuk autocorrect, memperbaiki spasi dan typo
   const autocorrect = (text) => {
-    let correctedText = text.toLowerCase(); // Pastikan semua huruf menjadi kecil
-
-    // Cek setiap kata dalam dictionary
+    let correctedText = text.toLowerCase();
     Object.entries(dictionary).forEach(([word, typoList]) => {
       typoList.forEach(({ typo }) => {
-        const regex = new RegExp(`\\b${typo}\\b`, 'gi'); // Regex untuk memastikan kata yang cocok
-        correctedText = correctedText.replace(regex, word); // Ganti typo dengan kata yang benar
+        const regex = new RegExp(\\b${typo}\\b, "gi");
+        correctedText = correctedText.replace(regex, word);
       });
     });
-
     return correctedText;
   };
 
-  useEffect(() => {
-    if (intervalId) clearInterval(intervalId); // Hentikan interval sebelumnya jika ada
+  const captureFrame = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement("canvas");
+      const video = videoRef.current;
 
-    // Create a new interval untuk fetch berdasarkan fetchInterval
-    const newIntervalId = setInterval(async () => {
-      try {
-        const response = await axios.get('https://eae5-34-73-255-143.ngrok-free.app/detections');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-        if (response.data && response.data.length > 0) {
-          const detectedClass = response.data[0].class;
-          const detectedConfidence = response.data[0].confidence; // Confidence dari API
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-          // Hanya tambahkan huruf jika confidence > 50%
-          if (detectedConfidence > 0.5) {
-            setSentence((prevSentence) => {
-              const updatedSentence = prevSentence + detectedClass; // Tambahkan huruf ke hasil deteksi
-              return autocorrect(updatedSentence); // Perbaiki hasil deteksi dengan autocorrect
-            });
-            setLastConfidence(detectedConfidence); // Update confidence terakhir
-          }
+      const frame = canvas.toDataURL("image/jpeg");
+      return frame.split(",")[1]; // Hanya ambil data base64
+    }
+    return null;
+  };
+
+  const sendFrameToServer = async () => {
+    const frame = captureFrame();
+    if (!frame) return;
+
+    try {
+      const response = await axios.post("https://f4a6-104-196-52-156.ngrok-free.app/process_frame", {
+        frame,
+      });
+
+      if (response.data && response.data.length > 0) {
+        const detectedClass = response.data[0].class;
+        const detectedConfidence = response.data[0].confidence;
+
+        if (detectedConfidence > 0.5) {
+          setSentence((prevSentence) => {
+            const updatedSentence = prevSentence + detectedClass;
+            return autocorrect(updatedSentence);
+          });
+
+          setDetections((prevDetections) => [
+            ...prevDetections,
+            { class: detectedClass, confidence: detectedConfidence },
+          ]);
+          setLastConfidence(detectedConfidence);
         }
-      } catch (error) {
-        console.error('Error fetching detections:', error);
       }
-    }, fetchInterval);
+    } catch (err) {
+      console.error("Error sending frame to server: ", err);
+    }
+  };
 
-    setIntervalId(newIntervalId); // Simpan ID interval baru
-    return () => clearInterval(newIntervalId); // Cleanup saat fetchInterval berubah
-  }, [fetchInterval, dictionary]); // Update saat fetchInterval atau dictionary berubah
+  useEffect(() => {
+    if (intervalId) clearInterval(intervalId);
+
+    const newIntervalId = setInterval(sendFrameToServer, fetchInterval);
+    setIntervalId(newIntervalId);
+
+    return () => clearInterval(newIntervalId);
+  }, [fetchInterval]);
 
   const handleIntervalChange = (e) => {
-    setFetchInterval(Number(e.target.value)); // Update interval fetching
+    setFetchInterval(Number(e.target.value));
   };
 
-  // Menghapus seluruh hasil deteksi
   const handleClearAll = () => {
-    setSentence('');
-    setLastConfidence(null); // Reset confidence
+    setSentence("");
+    setDetections([]);
+    setLastConfidence(null);
   };
 
-  // Menghapus huruf terakhir dari hasil deteksi
   const handleClearLast = () => {
     setSentence((prevSentence) => prevSentence.slice(0, -1));
-    setLastConfidence(null); // Reset confidence karena huruf terakhir dihapus
+    setDetections((prevDetections) => prevDetections.slice(0, -1));
+    setLastConfidence(null);
   };
 
-  // Menambahkan spasi di akhir kalimat
   const handleAddSpace = () => {
-    setSentence((prevSentence) => prevSentence + ' '); // Tambahkan spasi di akhir kalimat
+    setSentence((prevSentence) => prevSentence + " ");
   };
 
   return (
@@ -97,34 +131,39 @@ function App() {
       <h1>Real-Time Object Detection</h1>
       <div>
         <h2>Live Feed:</h2>
-        <img src={imageSrc} alt="Video Feed" style={{ width: '100%', height: 'auto' }} />
+        <video ref={videoRef} autoPlay playsInline style={{ width: "100%" }} />
       </div>
       <div>
         <h2>Detected Sentence:</h2>
-        {lastConfidence !== null && ( // Tampilkan confidence jika ada
-          <p>Last Confidence: {lastConfidence}%</p>
-        )}
+        {lastConfidence !== null && <p>Last Confidence: {lastConfidence}%</p>}
         <p>{sentence}</p>
-        <button onClick={handleClearAll}>Clear All</button> {/* Tombol untuk menghapus seluruh hasil */}
-        <button onClick={handleClearLast}>Clear Last Character</button> {/* Tombol untuk menghapus huruf terakhir */}
-        <button onClick={handleAddSpace}>Add Space</button> {/* Tombol untuk menambahkan spasi */}
+        <button onClick={handleClearAll}>Clear All</button>
+        <button onClick={handleClearLast}>Clear Last Character</button>
+        <button onClick={handleAddSpace}>Add Space</button>
       </div>
       <div>
         <h2>Set Fetch Interval:</h2>
         <select onChange={handleIntervalChange} value={fetchInterval}>
+          <option value={500}>0.5 seconds</option>
           <option value={1000}>1 second</option>
           <option value={1500}>1.5 seconds</option>
           <option value={2000}>2 seconds</option>
-          <option value={2500}>2.5 seconds</option>
           <option value={3000}>3 seconds</option>
-          <option value={3500}>3.5 seconds</option>
-          <option value={4000}>4 seconds</option>
-          <option value={4500}>4.5 seconds</option>
           <option value={5000}>5 seconds</option>
         </select>
       </div>
+      <div>
+        <h2>Individual Detections:</h2>
+        <ul>
+          {detections.map((det, index) => (
+            <li key={index}>
+              {det.class} - {det.confidence}%
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
-}
+};
 
 export default App;
