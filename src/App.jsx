@@ -33,11 +33,7 @@ const App = () => {
     };
 
     fetchDictionary();
-    useEffect(() => {
-      return () => {
-        if (intervalId) clearInterval(intervalId);
-      };
-    }, [intervalId]);    
+    return () => clearInterval(intervalId); // Cleanup saat unmount
   }, []);
 
   const autocorrect = (text) => {
@@ -100,12 +96,13 @@ const App = () => {
   };
 
   useEffect(() => {
-    sendFrameToServer(); // Panggil pertama kali
+    if (intervalId) clearInterval(intervalId);
+
     const newIntervalId = setInterval(sendFrameToServer, fetchInterval);
     setIntervalId(newIntervalId);
-  
+
     return () => clearInterval(newIntervalId);
-  }, [fetchInterval]);  
+  }, [fetchInterval]);
 
   const handleIntervalChange = (e) => {
     setFetchInterval(Number(e.target.value));
